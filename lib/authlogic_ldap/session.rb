@@ -71,6 +71,15 @@ module AuthlogicLdap
       end
       alias_method :find_by_ldap_login_method=, :find_by_ldap_login_method
       
+      # Auth against the local database before attemping to auth against the LDAP server.
+      #
+      # * <tt>Default:</tt> false
+      # * <tt>Accepts:</tt> Boolean
+      def ldap_search_local_database_first(value = nil)
+        rw_config(:ldap_search_local_database_first, value, false)
+      end
+      alias_method :ldap_search_local_database_first=, :ldap_search_local_database_first 
+      
       # If LDAP authentication has succeeded, but the user does not exist in the database, set this to true to have
       # the the user created in the database. You will need to provide your own method to create the user in the database.
       # By default, the method name is create_with_ldap_data. Use create_with_ldap_data_method to change.
@@ -175,6 +184,10 @@ module AuthlogicLdap
           errors.add(:ldap_password, I18n.t('error_messages.ldap_password_blank', :default => "can not be blank")) if ldap_password.blank?
           return if errors.count > 0
           
+          # Check local database first
+          self.attempted_record = search_for_record(find_by_login_method, ldap_login) if ldap_search_local_database_first
+          return unless self.attempted_record.blank?
+          
           ldap = Net::LDAP.new(:host       => ldap_host, 
                                :port       => ldap_port, 
                                :encryption => (:simple_tls if ldap_use_encryption) )
@@ -182,7 +195,7 @@ module AuthlogicLdap
           ldap.auth ldap_login_format % ldap_login, ldap_password
           if ldap.bind
             self.attempted_record = search_for_record(find_by_ldap_login_method, ldap_login)
-            if attempted_record.blank?
+            if self.attempted_record.blank?
               if ldap_create_in_database  && (user_data = fetch_user_data(ldap_login, ldap_password))
                 self.attempted_record = search_for_record(create_with_ldap_data_method, ldap_login, ldap_password, user_data)
               else
@@ -218,6 +231,10 @@ module AuthlogicLdap
 
         def find_by_ldap_login_method
           self.class.find_by_ldap_login_method
+        end
+        
+        def ldap_search_local_database_first
+          self.class.ldap_search_local_database_first
         end
         
         def ldap_create_in_database
