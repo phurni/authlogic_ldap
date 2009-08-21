@@ -4,7 +4,7 @@ module AuthlogicLdap
     def self.included(klass)
       klass.class_eval do
         extend Config
-        include Methods
+        include InstanceMethods
       end
     end
     
@@ -51,6 +51,19 @@ module AuthlogicLdap
       end
       alias_method :ldap_use_encryption=, :ldap_use_encryption
       
+      def ldap_login_field(value = nil)
+        rw_config(:ldap_login_field, value, :ldap_login)
+      end
+      alias_method :ldap_login_field=, :ldap_login_field
+      
+      # Works exactly like login_field, but for the password instead. Returns :password if a login_field exists.
+      #
+      # * <tt>Default:</tt> :ldap_password
+      # * <tt>Accepts:</tt> Symbol or String
+      def ldap_password_field(value = nil)
+        rw_config(:ldap_password_field, value, :ldap_password)
+      end
+      alias_method :ldap_password_field=, :ldap_password_field
       
       # Once LDAP authentication has succeeded we need to find the user in the database. By default this just calls the
       # find_by_ldap_login method provided by ActiveRecord. If you have a more advanced set up and need to find users
@@ -67,7 +80,7 @@ module AuthlogicLdap
       # * <tt>Default:</tt> :find_by_ldap_login
       # * <tt>Accepts:</tt> Symbol
       def find_by_ldap_login_method(value = nil)
-        rw_config(:find_by_ldap_login_method, value, :find_by_ldap_login)
+        rw_config(:find_by_ldap_login_method, value, :find_by_smart_case_ldap_login_field)
       end
       alias_method :find_by_ldap_login_method=, :find_by_ldap_login_method
       
@@ -81,7 +94,7 @@ module AuthlogicLdap
       alias_method :ldap_search_local_database_first=, :ldap_search_local_database_first 
       
       # If LDAP authentication has succeeded, but the user does not exist in the database, set this to true to have
-      # the the user created in the database. You will need to provide your own method to create the user in the database.
+      # the the user created in the database. You NEED to provide your own method to create the user in the database.
       # By default, the method name is create_with_ldap_data. Use create_with_ldap_data_method to change.
       #
       # For example, to create the user you might do something like:
@@ -126,7 +139,7 @@ module AuthlogicLdap
       alias_method :ldap_search_attribute=, :ldap_search_attribute
       
       # User creation from LDAP data method. Use this to change the method for creating a user
-      # in the local database.
+      # in the local database. This must be defined in your model if ldap_create_in_database is true!
       #
       # Example: create_with_ldap_data_method :create_with_ldap_info
       #
@@ -139,13 +152,26 @@ module AuthlogicLdap
     end
     
     
-    module Methods
+    module InstanceMethods
       def self.included(klass)
         klass.class_eval do
-          attr_accessor :ldap_login
-          attr_accessor :ldap_password
+          attr_accessor ldap_login_field
+          attr_accessor   ldap_password_field
+          
           validate :validate_by_ldap, :if => :authenticating_with_ldap?
+          
         end
+        
+        # value = ldap_password_field
+        # 
+        # klass.class_eval <<-"end_eval", __FILE__, __LINE__
+        #   private
+        #     # The password should not be accessible publicly. This way forms using form_for don't fill the password with the attempted password. To prevent this we just create this method that is private.
+        #     def protected_#{value}
+        #       @#{value}
+        #     end
+        # end_eval
+        
         def ldap_use_encryption
           self.class.ldap_use_encryption
         end
@@ -155,8 +181,8 @@ module AuthlogicLdap
       def credentials
         if authenticating_with_ldap?
           details = {}
-          details[:ldap_login] = send(login_field)
-          details[:ldap_password] = "<protected>"
+          details[ldap_login_field.to_sym] = send(ldap_login_field)
+          details[ldap_password_field.to_sym] = "<protected>"
           details
         else
           super
@@ -169,37 +195,40 @@ module AuthlogicLdap
         values = value.is_a?(Array) ? value : [value]
         hash = values.first.is_a?(Hash) ? values.first.with_indifferent_access : nil
         if !hash.nil?
-          self.ldap_login = hash[:ldap_login] if hash.key?(:ldap_login)
-          self.ldap_password = hash[:ldap_password] if hash.key?(:ldap_password)
+          hash.slice(ldap_login_field, ldap_password_field).each do |field,value|
+            next if value.blank?
+            send("#{field}=", value)
+          end
         end
       end
       
       private
         def authenticating_with_ldap?
-          !ldap_host.blank? && (!ldap_login.blank? || !ldap_password.blank?)
+          !ldap_host.blank? && (!send(ldap_login_field).blank? || !send(ldap_password_field).blank?)
         end
         
         def validate_by_ldap
-          errors.add(:ldap_login, I18n.t('error_messages.ldap_login_blank', :default => "can not be blank")) if ldap_login.blank?
-          errors.add(:ldap_password, I18n.t('error_messages.ldap_password_blank', :default => "can not be blank")) if ldap_password.blank?
+          errors.add(ldap_login_field, I18n.t('error_messages.ldap_login_blank', :default => "can not be blank")) if send(ldap_login_field).blank?
+          errors.add(ldap_password_field, I18n.t('error_messages.ldap_password_blank', :default => "can not be blank")) if send("#{ldap_password_field}").blank?
           return if errors.count > 0
           
           # Check local database first
-          self.attempted_record = search_for_record(find_by_login_method, ldap_login) if ldap_search_local_database_first
+          # self.attempted_record = search_for_record(find_by_login_method, ldap_login) if ldap_search_local_database_first
+          # validate_by_password if ldap_search_local_database_first
           return unless self.attempted_record.blank?
           
           ldap = Net::LDAP.new(:host       => ldap_host, 
                                :port       => ldap_port, 
                                :encryption => (:simple_tls if ldap_use_encryption) )
 
-          ldap.auth ldap_login_format % ldap_login, ldap_password
+          ldap.auth ldap_login_format % send(ldap_login_field), send("#{ldap_password_field}")
           if ldap.bind
-            self.attempted_record = search_for_record(find_by_ldap_login_method, ldap_login)
+            self.attempted_record = search_for_record(find_by_ldap_login_method, send(ldap_login_field))
             if self.attempted_record.blank?
-              if ldap_create_in_database  && (user_data = fetch_user_data(ldap_login, ldap_password))
-                self.attempted_record = search_for_record(create_with_ldap_data_method, ldap_login, ldap_password, user_data)
+              if ldap_create_in_database  && (user_data = fetch_user_data(send(ldap_login_field), send("#{ldap_password_field}")))
+                self.attempted_record = search_for_record(create_with_ldap_data_method, send(ldap_login_field), send("#{ldap_password_field}"), user_data)
               else
-                errors.add(:ldap_login, I18n.t('error_messages.ldap_login_not_found', :default => "does not exist"))
+                errors.add(ldap_login_field, I18n.t('error_messages.ldap_login_not_found', :default => "does not exist"))
               end
             end
           else
@@ -227,6 +256,14 @@ module AuthlogicLdap
         
         def ldap_login_format
           self.class.ldap_login_format
+        end
+
+        def ldap_login_field
+          self.class.ldap_login_field
+        end
+
+        def ldap_password_field
+          self.class.ldap_password_field
         end
 
         def find_by_ldap_login_method
