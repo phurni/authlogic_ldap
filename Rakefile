@@ -1,6 +1,7 @@
 ENV['RDOCOPT'] = "-S -f html -T hanna"
 
 require "rubygems"
+require 'rake/rdoctask'
 
 require File.dirname(__FILE__) << "/lib/authlogic_ldap/version"
 
@@ -17,4 +18,14 @@ begin
   end
   rescue LoadError
     puts "Jeweler (or a dependency) not available. Install it with: sudo gem install jeweler"
+end
+
+desc "Generate documenation for the authlogic_ldap plugin."
+Rake::RDocTask.new(:rdoc) do |rdoc|
+  rdoc.rdoc_dir = 'rdoc'
+  rdoc.title    = 'authlogic_ldap'
+  rdoc.options << '--line-numbers' << '--inline-source'
+  rdoc.rdoc_files.include('README.rdoc')
+  rdoc.rdoc_files.include('TODO.rdoc')
+  rdoc.rdoc_files.include('lib/**/*.rb')
 end

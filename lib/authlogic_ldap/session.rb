@@ -183,7 +183,6 @@ module AuthlogicLdap
       # end
       
       def initialize(*args)
-        puts "Initializing in #{__FILE__}!"
         if !self.class.configured_ldap_password_methods
           if ldap_login_field
             self.class.send(:attr_writer, ldap_login_field) if !respond_to?("#{ldap_login_field}=")
