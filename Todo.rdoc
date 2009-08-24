@@ -2,3 +2,4 @@
 * Add tests
 * Add more options
 * Make ldap_login and ldap_password database fields configurable in acts_as_authentic
+* Create more documentation in README.rdoc

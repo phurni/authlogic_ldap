@@ -9,6 +9,9 @@ Authlogic to allow for LDAP authentication.
 
 == FEATURES/PROBLEMS:
 
+Authentication against a database before checking LDAP.
+Create a user in the database, if they exist in LDAP.
+
 == SYNOPSIS:
 
 == REQUIREMENTS:
