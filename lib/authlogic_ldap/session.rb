@@ -1,10 +1,14 @@
 module AuthlogicLdap
   module Session
-    # Add a simple openid_identifier attribute and some validations for the field.
     def self.included(klass)
       klass.class_eval do
         extend Config
         include InstanceMethods
+        validate :validate_by_ldap, :if => :authenticating_with_ldap?
+        
+        class << self
+          attr_accessor :configured_ldap_password_methods
+        end
       end
     end
     
@@ -21,7 +25,7 @@ module AuthlogicLdap
       # The port of your LDAP server.
       #
       # * <tt>Default:</tt> 389
-      # * <tt>Accepts:</tt> Fixnum, integer
+      # * <tt>Accepts:</tt> Fixnum, Integer
       def ldap_port(value = nil)
         rw_config(:ldap_port, value, 389)
       end
@@ -40,7 +44,8 @@ module AuthlogicLdap
       alias_method :ldap_login_format=, :ldap_login_format
       
       # LDAP Encryption configuration settings. Depending on your current LDAP Server
-      # you may need to setup encryption.
+      # you may need to setup encryption. If you set this options, you will probably
+      # want to change your port to 636
       #
       # Example: ldap_use_encryption true
       #
@@ -51,12 +56,22 @@ module AuthlogicLdap
       end
       alias_method :ldap_use_encryption=, :ldap_use_encryption
       
+      # The name of the method for storing the login/username.
+      # It is the same as Authlogic::Session::Password:login_field
+      # Set to the same as Authlogic::Session::Password:login_field to
+      # allow authentication againts a database first.
+      #
+      # * <tt>Default:</tt> :ldap_login
+      # * <tt>Accepts:</tt> String or Symbol
       def ldap_login_field(value = nil)
         rw_config(:ldap_login_field, value, :ldap_login)
       end
       alias_method :ldap_login_field=, :ldap_login_field
       
-      # Works exactly like login_field, but for the password instead. Returns :password if a login_field exists.
+      # The name of the method for storing the password.
+      # It is the same as Authlogic::Session::Password:password_field
+      # Set to the same as Authlogic::Session::Password:password_field to
+      # allow authentication againts a database first.
       #
       # * <tt>Default:</tt> :ldap_password
       # * <tt>Accepts:</tt> Symbol or String
@@ -85,6 +100,8 @@ module AuthlogicLdap
       alias_method :find_by_ldap_login_method=, :find_by_ldap_login_method
       
       # Auth against the local database before attemping to auth against the LDAP server.
+      # For this to work, ldap_login_field and ldap_password_field need to have the
+      # same values as login_field and password_field.
       #
       # * <tt>Default:</tt> false
       # * <tt>Accepts:</tt> Boolean
@@ -120,7 +137,7 @@ module AuthlogicLdap
       #
       # Example: ldap_search_base "ou=People,dc=example,dc=com"
       #
-      # * <tt>Default:</tt> 
+      # * <tt>Default:</tt> ''
       # * <tt>Accepts:</tt> String
       def ldap_search_base(value = nil)
         rw_config(:ldap_search_base, value, '')
@@ -153,28 +170,45 @@ module AuthlogicLdap
     
     
     module InstanceMethods
-      def self.included(klass)
-        klass.class_eval do
-          attr_accessor ldap_login_field
-          attr_accessor   ldap_password_field
+      # def self.included(klass)
+      #   klass.class_eval do
+      #     attr_accessor ldap_login_field
+      #     attr_accessor ldap_password_field
+      #     
+      #     
+      #   end
+      #   
+      #   # value = ldap_password_field
+      #   # 
+      # end
+      
+      def initialize(*args)
+        puts "Initializing in #{__FILE__}!"
+        if !self.class.configured_ldap_password_methods
+          if ldap_login_field
+            self.class.send(:attr_writer, ldap_login_field) if !respond_to?("#{ldap_login_field}=")
+            self.class.send(:attr_reader, ldap_login_field) if !respond_to?(login_field)
+          end
           
-          validate :validate_by_ldap, :if => :authenticating_with_ldap?
+          if ldap_password_field
+            self.class.send(:attr_writer, ldap_password_field) if !respond_to?("#{ldap_password_field}=")
+            self.class.send(:define_method, ldap_password_field) {} if !respond_to?(ldap_password_field)
+            
+            klass.class_eval <<-"end_eval", __FILE__, __LINE__
+              private
+                # The password should not be accessible publicly. This way forms using form_for don't 
+                # fill the password with the attempted password. To prevent this we just create this method that is private.
+                def protected_#{ldap_password_field}
+                  @#{ldap_password_field}
+                end
+            end_eval
+          end
+          
+          self.class.configured_ldap_password_methods = true
           
         end
         
-        # value = ldap_password_field
-        # 
-        # klass.class_eval <<-"end_eval", __FILE__, __LINE__
-        #   private
-        #     # The password should not be accessible publicly. This way forms using form_for don't fill the password with the attempted password. To prevent this we just create this method that is private.
-        #     def protected_#{value}
-        #       @#{value}
-        #     end
-        # end_eval
-        
-        def ldap_use_encryption
-          self.class.ldap_use_encryption
-        end
+        super
       end
       
       # Hooks into credentials to print out meaningful credentials for LDAP authentication.
@@ -208,25 +242,26 @@ module AuthlogicLdap
         end
         
         def validate_by_ldap
-          errors.add(ldap_login_field, I18n.t('error_messages.ldap_login_blank', :default => "can not be blank")) if send(ldap_login_field).blank?
-          errors.add(ldap_password_field, I18n.t('error_messages.ldap_password_blank', :default => "can not be blank")) if send("#{ldap_password_field}").blank?
-          return if errors.count > 0
+          # If a previous authentication valided the user/pass and there are no errors, return now.
+          return if ldap_search_local_database_first && errors.count == 0 && !self.attempted_record.blank? 
           
-          # Check local database first
-          # self.attempted_record = search_for_record(find_by_login_method, ldap_login) if ldap_search_local_database_first
-          # validate_by_password if ldap_search_local_database_first
-          return unless self.attempted_record.blank?
+          # There were errors, or we do want to search this. Clear previous errors, or we will return
+          # before checking LDAP.
+          errors.clear
+          errors.add(ldap_login_field, I18n.t('error_messages.ldap_login_blank', :default => "cannot be blank")) if send(ldap_login_field).blank?
+          errors.add(ldap_password_field, I18n.t('error_messages.ldap_password_blank', :default => "cannot be blank")) if send("protected_#{ldap_password_field}").blank?
+          return if errors.count > 0
           
           ldap = Net::LDAP.new(:host       => ldap_host, 
                                :port       => ldap_port, 
                                :encryption => (:simple_tls if ldap_use_encryption) )
 
-          ldap.auth ldap_login_format % send(ldap_login_field), send("#{ldap_password_field}")
+          ldap.auth ldap_login_format % send(ldap_login_field), send("protected_#{ldap_password_field}")
           if ldap.bind
-            self.attempted_record = search_for_record(find_by_ldap_login_method, send(ldap_login_field))
+            self.attempted_record = search_for_record(find_by_ldap_login_method, send("protected_#{ldap_password_field}"))
             if self.attempted_record.blank?
-              if ldap_create_in_database  && (user_data = fetch_user_data(send(ldap_login_field), send("#{ldap_password_field}")))
-                self.attempted_record = search_for_record(create_with_ldap_data_method, send(ldap_login_field), send("#{ldap_password_field}"), user_data)
+              if ldap_create_in_database  && (user_data = fetch_user_data(send(ldap_login_field), send("protected_#{ldap_password_field}")))
+                self.attempted_record = search_for_record(create_with_ldap_data_method, send(ldap_login_field), send("protected_#{ldap_password_field}"), user_data)
               else
                 errors.add(ldap_login_field, I18n.t('error_messages.ldap_login_not_found', :default => "does not exist"))
               end
@@ -252,6 +287,10 @@ module AuthlogicLdap
         
         def ldap_port
           self.class.ldap_port
+        end
+        
+        def ldap_use_encryption
+          self.class.ldap_use_encryption
         end
         
         def ldap_login_format
@@ -289,6 +328,7 @@ module AuthlogicLdap
         def create_with_ldap_data_method
           self.class.create_with_ldap_data_method
         end
+        
     end
   end
 end
