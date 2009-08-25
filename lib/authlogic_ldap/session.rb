@@ -186,7 +186,7 @@ module AuthlogicLdap
         if !self.class.configured_ldap_password_methods
           if ldap_login_field
             self.class.send(:attr_writer, ldap_login_field) if !respond_to?("#{ldap_login_field}=")
-            self.class.send(:attr_reader, ldap_login_field) if !respond_to?(login_field)
+            self.class.send(:attr_reader, ldap_login_field) if !respond_to?(ldap_login_field)
           end
           
           if ldap_password_field
