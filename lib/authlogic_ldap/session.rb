@@ -257,7 +257,7 @@ module AuthlogicLdap
 
           ldap.auth ldap_login_format % send(ldap_login_field), send("protected_#{ldap_password_field}")
           if ldap.bind
-            self.attempted_record = search_for_record(find_by_ldap_login_method, send("protected_#{ldap_password_field}"))
+            self.attempted_record = search_for_record(find_by_ldap_login_method, send(ldap_login_field))
             if self.attempted_record.blank?
               if ldap_create_in_database  && (user_data = fetch_user_data(send(ldap_login_field), send("protected_#{ldap_password_field}")))
                 self.attempted_record = search_for_record(create_with_ldap_data_method, send(ldap_login_field), send("protected_#{ldap_password_field}"), user_data)
