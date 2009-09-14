@@ -275,7 +275,7 @@ module AuthlogicLdap
                                :port       => ldap_port, 
                                :encryption => (:simple_tls if ldap_use_encryption),
                                :base       => ldap_search_base )
-          ldap.authenticate(ldap_login_format % login,password)
+          ldap.authenticate(ldap_login_format % login, password)
           result = ldap.search(:filter => Net::LDAP::Filter.eq(ldap_search_attribute,login))
           result[0] if result
         end
