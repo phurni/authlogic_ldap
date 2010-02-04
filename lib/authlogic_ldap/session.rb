@@ -268,7 +268,7 @@ module AuthlogicLdap
                 end
               end
             else
-              errors.add_to_base(ldap.get_operation_result.message)
+              errors.add_to_base(Authlogic::I18n.t("error_messages.ldap_bind_failed.#{ldap.get_operation_result.message}", :default => [:'error_messages.ldap_bind_failed.default', ldap.get_operation_result.message]))
             end
           rescue Net::LDAP::LdapError => e
             errors.add_to_base(Authlogic::I18n.t("error_messages.ldap_exception.#{e.message}", :default => [:'error_messages.ldap_exception.default', e.message]))
