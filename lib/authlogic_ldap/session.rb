@@ -247,8 +247,8 @@ module AuthlogicLdap
           # There were errors, or we do want to search this. Clear previous errors, or we will return
           # before checking LDAP.
           errors.clear
-          errors.add(ldap_login_field, I18n.t('error_messages.ldap_login_blank', :default => "cannot be blank")) if send(ldap_login_field).blank?
-          errors.add(ldap_password_field, I18n.t('error_messages.ldap_password_blank', :default => "cannot be blank")) if send("protected_#{ldap_password_field}").blank?
+          errors.add(ldap_login_field, Authlogic::I18n.t('error_messages.ldap_login_blank', :default => "cannot be blank")) if send(ldap_login_field).blank?
+          errors.add(ldap_password_field, Authlogic::I18n.t('error_messages.ldap_password_blank', :default => "cannot be blank")) if send("protected_#{ldap_password_field}").blank?
           return if errors.count > 0
           
           ldap = Net::LDAP.new(:host       => ldap_host, 
@@ -262,7 +262,7 @@ module AuthlogicLdap
               if ldap_create_in_database  && (user_data = fetch_user_data(send(ldap_login_field), send("protected_#{ldap_password_field}")))
                 self.attempted_record = search_for_record(create_with_ldap_data_method, send(ldap_login_field), send("protected_#{ldap_password_field}"), user_data)
               else
-                errors.add(ldap_login_field, I18n.t('error_messages.ldap_login_not_found', :default => "does not exist"))
+                errors.add(ldap_login_field, Authlogic::I18n.t('error_messages.ldap_login_not_found', :default => "does not exist"))
               end
             end
           else
