@@ -37,7 +37,7 @@ module AuthlogicLdap
         klass.class_eval do
           attr_accessor :ldap_password
           
-          if validate_ldap_login
+          if validate_ldap_login && ldap_login_field
             validates_uniqueness_of :ldap_login, :scope => validations_scope, :if => :using_ldap?
             validates_presence_of :ldap_password, :if => :validate_ldap?
             validate :validate_ldap, :if => :validate_ldap?
